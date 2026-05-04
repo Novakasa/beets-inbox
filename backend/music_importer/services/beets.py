@@ -91,11 +91,7 @@ def remove_from_inbox(config: Config, path: Path) -> subprocess.CompletedProcess
     Does NOT delete the source file — callers are responsible for that so the
     cleanup happens even when the item was never cataloged in the inbox DB.
     """
-    if path.is_dir():
-        # Match all items whose path starts with this directory
-        query = f"path:{path}/"
-    else:
-        query = f"path:{path}"
+    query = f"path:{path}/" if path.is_dir() else f"path:{path}"
     return _beet(
         config.beets_inbox_config,
         "remove", "-f", query,
