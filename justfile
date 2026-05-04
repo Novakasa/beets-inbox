@@ -65,13 +65,21 @@ validate-beets:
 
 # ── Elm ───────────────────────────────────────────────────────────────────────
 
+# Regenerate nix/elm-srcs.nix and nix/registry.dat after elm.json changes
+elm2nix:
+    cd frontend && elm2nix convert > ../nix/elm-srcs.nix && elm2nix snapshot && mv registry.dat ../nix/registry.dat
+
 # Build the Elm frontend (optimised)
 build-frontend:
+    mkdir -p frontend/dist
     cd frontend && elm make src/Main.elm --optimize --output=dist/main.js
+    cp frontend/index.html frontend/dist/index.html
 
 # Build the Elm frontend in debug mode (includes Elm debugger)
 build-frontend-debug:
+    mkdir -p frontend/dist
     cd frontend && elm make src/Main.elm --output=dist/main.js
+    cp frontend/index.html frontend/dist/index.html
 
 # Type-check Elm without producing output
 check-frontend:

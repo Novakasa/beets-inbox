@@ -8,13 +8,31 @@
 
   outputs = { self, nixpkgs, flake-utils }:
     let
-      # NixOS module — exported for all systems
       nixosModule = import ./nix/module.nix;
     in
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
         python = pkgs.python312;
+
+        # ── Elm frontend ──────────────────────────────────────────────────────
+        elmFrontend = pkgs.stdenv.mkDerivation {
+          name = "beets-inbox-frontend";
+          src = ./frontend;
+
+          nativeBuildInputs = [ pkgs.elmPackages.elm ];
+
+          buildPhase = pkgs.elmPackages.fetchElmDeps {
+            elmPackages = import ./nix/elm-srcs.nix;
+            elmVersion = "0.19.1";
+            registryDat = ./nix/registry.dat;
+          };
+
+          installPhase = ''
+            elm make src/Main.elm --optimize --output=$out/main.js
+            cp ${./frontend/index.html} $out/index.html
+          '';
+        };
 
         # ── Python package ────────────────────────────────────────────────────
         pythonDeps = ps: with ps; [
@@ -24,8 +42,6 @@
           python-multipart
           mutagen
         ];
-
-        beetsInboxPython = python.withPackages pythonDeps;
 
         beetsInboxPackage = python.pkgs.buildPythonApplication {
           pname = "beets-inbox";
@@ -38,15 +54,13 @@
 
           dependencies = pythonDeps python.pkgs;
 
-          # Bundle the pre-built Elm frontend
           postInstall = ''
-            install -Dm644 ${./frontend/dist/index.html} \
+            install -Dm644 ${elmFrontend}/index.html \
               $out/share/beets-inbox/frontend/index.html
-            install -Dm644 ${./frontend/dist/main.js} \
+            install -Dm644 ${elmFrontend}/main.js \
               $out/share/beets-inbox/frontend/main.js
           '';
 
-          # Runtime dep: beets must be on PATH for subprocess calls
           makeWrapperArgs = [
             "--prefix" "PATH" ":" "${pkgs.beets}/bin"
           ];
@@ -58,10 +72,8 @@
         };
       in
       {
-        # ── Package ───────────────────────────────────────────────────────────
         packages.default = beetsInboxPackage;
 
-        # ── Dev shell ─────────────────────────────────────────────────────────
         devShells.default = pkgs.mkShell {
           packages = [
             # Python
@@ -74,6 +86,8 @@
             # Elm
             pkgs.elmPackages.elm
             pkgs.elmPackages.elm-format
+            pkgs.elmPackages.elm-language-server
+            pkgs.haskellPackages.elm2nix
 
             # Tools
             pkgs.sqlite
@@ -95,7 +109,6 @@
         };
       }
     ) // {
-      # ── NixOS module (system-independent) ────────────────────────────────
       nixosModules.default = nixosModule;
     };
 }

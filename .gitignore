@@ -10,6 +10,7 @@ backend/dist/
 
 # Elm
 elm-stuff/
+frontend/dist/
 
 # Nix
 result
