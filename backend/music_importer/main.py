@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,8 +20,14 @@ logger = logging.getLogger(__name__)
 
 # Static files are built by Elm and placed here at build time (or served
 # from a dev server during development).
-# backend/music_importer/main.py → backend/ → repo root → frontend/dist
-_STATIC_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
+# BEETS_STATIC_DIR env var overrides the default (used by Nix packaging).
+# Default: backend/music_importer/main.py → backend/ → repo root → frontend/dist
+_STATIC_DIR = Path(
+    os.environ.get(
+        "BEETS_STATIC_DIR",
+        str(Path(__file__).parent.parent.parent / "frontend" / "dist"),
+    )
+)
 
 
 @asynccontextmanager
