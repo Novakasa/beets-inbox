@@ -5,8 +5,8 @@ __pycache__/
 dist/
 .venv/
 
-# uv
-uv.lock
+# direnv
+.direnv/
 
 # Elm
 elm-stuff/

@@ -20,13 +20,7 @@
             pkgs.uv
 
             # Beets
-            (pkgs.beets.override {
-              pluginOverrides = {
-                chroma.enable = true;
-                fetchart.enable = true;
-                embedart.enable = true;
-              };
-            })
+            pkgs.beets
 
             # Elm
             pkgs.elmPackages.elm
