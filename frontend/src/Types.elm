@@ -1,16 +1,13 @@
 module Types exposing
     ( EditForm
-    , ImportRequest
     , InboxItem
-    , Job
-    , JobStatus(..)
+    , TagUpdate
+    , TrackInfo
     , editFormFromItem
-    , encodeImportRequest
-    , formToImportRequest
+    , encodeTagUpdate
+    , formToTagUpdate
     , httpErrorToString
     , inboxItemDecoder
-    , jobDecoder
-    , jobStatusLabel
     )
 
 import Http
@@ -19,11 +16,38 @@ import Json.Encode as E
 
 
 -- ── Applicative helper ────────────────────────────────────────────────────────
--- Lets us decode records with more than 8 fields without external packages.
 
 andMap : D.Decoder a -> D.Decoder (a -> b) -> D.Decoder b
 andMap =
     D.map2 (|>)
+
+
+-- ── TrackInfo ─────────────────────────────────────────────────────────────────
+
+
+type alias TrackInfo =
+    { id : String
+    , path : String
+    , title : Maybe String
+    , artist : Maybe String
+    , albumartist : Maybe String
+    , genre : Maybe String
+    , year : Maybe Int
+    , track : Maybe Int
+    }
+
+
+trackInfoDecoder : D.Decoder TrackInfo
+trackInfoDecoder =
+    D.succeed TrackInfo
+        |> andMap (D.field "id" D.string)
+        |> andMap (D.field "path" D.string)
+        |> andMap (D.field "title" (D.nullable D.string))
+        |> andMap (D.field "artist" (D.nullable D.string))
+        |> andMap (D.field "albumartist" (D.nullable D.string))
+        |> andMap (D.field "genre" (D.nullable D.string))
+        |> andMap (D.field "year" (D.nullable D.int))
+        |> andMap (D.field "track" (D.nullable D.int))
 
 
 -- ── InboxItem ─────────────────────────────────────────────────────────────────
@@ -46,6 +70,7 @@ type alias InboxItem =
     , sourceUrl : Maybe String
     , uploader : Maybe String
     , uploadDate : Maybe String
+    , tracks : List TrackInfo
     }
 
 
@@ -68,6 +93,7 @@ inboxItemDecoder =
         |> andMap (D.field "source_url" (D.nullable D.string))
         |> andMap (D.field "uploader" (D.nullable D.string))
         |> andMap (D.field "upload_date" (D.nullable D.string))
+        |> andMap (D.field "tracks" (D.list trackInfoDecoder))
 
 
 -- ── EditForm ──────────────────────────────────────────────────────────────────
@@ -79,7 +105,7 @@ type alias EditForm =
     , album : String
     , albumartist : String
     , genre : String
-    , year : String -- String input; parsed to Int on submit
+    , year : String
     }
 
 
@@ -94,10 +120,10 @@ editFormFromItem item =
     }
 
 
--- ── ImportRequest ─────────────────────────────────────────────────────────────
+-- ── TagUpdate ─────────────────────────────────────────────────────────────────
 
 
-type alias ImportRequest =
+type alias TagUpdate =
     { title : Maybe String
     , artist : Maybe String
     , album : Maybe String
@@ -107,8 +133,21 @@ type alias ImportRequest =
     }
 
 
-formToImportRequest : EditForm -> ImportRequest
-formToImportRequest form =
+encodeTagUpdate : TagUpdate -> E.Value
+encodeTagUpdate u =
+    [ Maybe.map (\v -> ( "title", E.string v )) u.title
+    , Maybe.map (\v -> ( "artist", E.string v )) u.artist
+    , Maybe.map (\v -> ( "album", E.string v )) u.album
+    , Maybe.map (\v -> ( "albumartist", E.string v )) u.albumartist
+    , Maybe.map (\v -> ( "genre", E.string v )) u.genre
+    , Maybe.map (\v -> ( "year", E.int v )) u.year
+    ]
+        |> List.filterMap identity
+        |> E.object
+
+
+formToTagUpdate : EditForm -> TagUpdate
+formToTagUpdate form =
     { title = nonEmpty form.title
     , artist = nonEmpty form.artist
     , album = nonEmpty form.album
@@ -116,81 +155,6 @@ formToImportRequest form =
     , genre = nonEmpty form.genre
     , year = String.toInt form.year
     }
-
-
-encodeImportRequest : ImportRequest -> E.Value
-encodeImportRequest req =
-    [ Maybe.map (\v -> ( "title", E.string v )) req.title
-    , Maybe.map (\v -> ( "artist", E.string v )) req.artist
-    , Maybe.map (\v -> ( "album", E.string v )) req.album
-    , Maybe.map (\v -> ( "albumartist", E.string v )) req.albumartist
-    , Maybe.map (\v -> ( "genre", E.string v )) req.genre
-    , Maybe.map (\v -> ( "year", E.int v )) req.year
-    ]
-        |> List.filterMap identity
-        |> E.object
-
-
--- ── Job ───────────────────────────────────────────────────────────────────────
-
-
-type JobStatus
-    = Pending
-    | Running
-    | Success
-    | Failed
-
-
-type alias Job =
-    { id : String
-    , status : JobStatus
-    , sourcePath : String
-    , category : Maybe String
-    , artist : Maybe String
-    , album : Maybe String
-    , genre : Maybe String
-    , log : String
-    , createdAt : String
-    , completedAt : Maybe String
-    }
-
-
-jobStatusDecoder : D.Decoder JobStatus
-jobStatusDecoder =
-    D.string
-        |> D.andThen
-            (\s ->
-                case s of
-                    "pending" ->
-                        D.succeed Pending
-
-                    "running" ->
-                        D.succeed Running
-
-                    "success" ->
-                        D.succeed Success
-
-                    "failed" ->
-                        D.succeed Failed
-
-                    _ ->
-                        D.fail ("Unknown job status: " ++ s)
-            )
-
-
-jobDecoder : D.Decoder Job
-jobDecoder =
-    D.succeed Job
-        |> andMap (D.field "id" D.string)
-        |> andMap (D.field "status" jobStatusDecoder)
-        |> andMap (D.field "source_path" D.string)
-        |> andMap (D.field "category" (D.nullable D.string))
-        |> andMap (D.field "artist" (D.nullable D.string))
-        |> andMap (D.field "album" (D.nullable D.string))
-        |> andMap (D.field "genre" (D.nullable D.string))
-        |> andMap (D.field "log" D.string)
-        |> andMap (D.field "created_at" D.string)
-        |> andMap (D.field "completed_at" (D.nullable D.string))
 
 
 -- ── Shared helpers ────────────────────────────────────────────────────────────
@@ -207,22 +171,6 @@ nonEmpty s =
 
     else
         Just trimmed
-
-
-jobStatusLabel : JobStatus -> String
-jobStatusLabel status =
-    case status of
-        Pending ->
-            "pending"
-
-        Running ->
-            "running"
-
-        Success ->
-            "success"
-
-        Failed ->
-            "failed"
 
 
 httpErrorToString : Http.Error -> String

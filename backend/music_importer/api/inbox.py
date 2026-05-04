@@ -6,16 +6,14 @@ import logging
 import shutil
 import threading
 import zipfile
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
-from .. import db as db_mod
 from ..config import Config
-from ..models import ImportRequest, InboxItem, Job, JobStatus
+from ..models import InboxItem, TagUpdate
 from ..services import beets as beets_svc
 from ..services import inbox as inbox_svc
 
@@ -131,7 +129,9 @@ def _extract_zip(data: bytes, dest_dir: Path, zip_name: str) -> Path:
         for member in zf.infolist():
             if member.is_dir() or member.filename.startswith("__MACOSX"):
                 continue
-            rel = member.filename[len(prefix):] if prefix else Path(member.filename).name
+            rel = (
+                member.filename[len(prefix):] if prefix else Path(member.filename).name
+            )
             if not rel:
                 continue
             out = album_dir / rel
@@ -141,79 +141,83 @@ def _extract_zip(data: bytes, dest_dir: Path, zip_name: str) -> Path:
     return album_dir
 
 
-# ── Import ────────────────────────────────────────────────────────────────────
+# ── Tag update ────────────────────────────────────────────────────────────────
 
-@router.post("/{item_id}/import", response_model=Job)
-def import_item(
+@router.patch("/{item_id}", status_code=200)
+def update_item_tags(
     item_id: str,
-    req: ImportRequest,
-    background_tasks: BackgroundTasks,
+    update: TagUpdate,
     config: _ConfigDep,
-) -> Job:
+) -> JSONResponse:
+    """Update tags for an inbox item (file or directory) via beet modify."""
     item = inbox_svc.get_item(config, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Inbox item not found")
+    if not item.cataloged:
+        raise HTTPException(status_code=409, detail="Item not yet cataloged")
 
-    job = db_mod.create_job(
-        config.jobs_db,
-        source_path=item.path,
-        category=item.category,
-        artist=req.artist,
-        album=req.album,
-        genre=req.genre,
-    )
-    background_tasks.add_task(_run_import, config, item, req, job.id)
-    return job
+    tags = update.model_dump(exclude_none=True)
+    if not tags:
+        return JSONResponse({"status": "no-op"})
+
+    path = Path(item.path)
+    result = beets_svc.modify_item(config, path, tags)
+    if result.returncode != 0:
+        raise HTTPException(status_code=500, detail="beet modify failed")
+    return JSONResponse({"status": "ok"})
 
 
-def _run_import(
-    config: Config, item: InboxItem, req: ImportRequest, job_id: str
-) -> None:
-    db_mod.update_job(config.jobs_db, job_id, JobStatus.running)
-    log_lines: list[str] = []
+# ── Import ────────────────────────────────────────────────────────────────────
 
-    try:
-        tags = req.model_dump(exclude_none=True)
-        path = Path(item.path)
+@router.post("/{item_id}/import", status_code=202)
+def import_item(
+    item_id: str,
+    background_tasks: BackgroundTasks,
+    config: _ConfigDep,
+) -> JSONResponse:
+    """Import an inbox item to the main library using its current beets DB tags."""
+    item = inbox_svc.get_item(config, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Inbox item not found")
+    if config.library_path is None:
+        raise HTTPException(status_code=503, detail="No main library configured")
 
-        # 1. Import to main library
-        log_lines.append(f"Importing {path} with tags {tags}\n")
-        result = beets_svc.import_to_library(config, path, tags)
-        log_lines.append(result.stdout)
-        if result.returncode != 0:
-            log_lines.append(f"stderr: {result.stderr}\n")
-            raise RuntimeError(f"beet import failed (rc={result.returncode})")
+    background_tasks.add_task(_run_import, config, item)
+    return JSONResponse({"status": "accepted"})
 
-        # 2. Remove from inbox beets DB (best-effort — item may not have been
-        #    cataloged yet if the user imported immediately after uploading).
-        log_lines.append("Removing from inbox DB...\n")
-        rm_result = beets_svc.remove_from_inbox(config, path)
-        if rm_result.returncode != 0:
-            logger.debug(
-                "beet remove returned %d (item may not have been cataloged): %s",
-                rm_result.returncode,
-                rm_result.stderr,
-            )
 
-        # 3. Delete source file(s) — explicit, not relying on `beet remove -d`
-        if path.is_dir():
-            shutil.rmtree(path, ignore_errors=True)
-        elif path.is_file():
-            path.unlink(missing_ok=True)
-            _clean_sidecars(path)
+def _run_import(config: Config, item: InboxItem) -> None:
+    path = Path(item.path)
 
-        db_mod.update_job(
-            config.jobs_db, job_id, JobStatus.success,
-            log="".join(log_lines),
-            completed_at=datetime.now(UTC),
+    # Read the current tags from the inbox beets DB as the source of truth.
+    tags = beets_svc.query_item_tags(config, path if path.is_file() else
+                                     next((Path(f) for f in item.files), path))
+
+    logger.info("Importing %s with tags %s", path, tags)
+    result = beets_svc.import_to_library(config, path, tags)
+    if result.returncode != 0:
+        logger.error(
+            "import_to_library failed rc=%d for %s\n  stdout: %s\n  stderr: %s",
+            result.returncode, path,
+            result.stdout.strip() or "(empty)",
+            result.stderr.strip() or "(empty)",
         )
-    except Exception as exc:
-        logger.exception("Import job %s failed", job_id)
-        db_mod.update_job(
-            config.jobs_db, job_id, JobStatus.failed,
-            log="".join(log_lines) + f"\nError: {exc}",
-            completed_at=datetime.now(UTC),
-        )
+        return
+
+    # Remove from inbox beets DB (best-effort).
+    rm = beets_svc.remove_from_inbox(config, path)
+    if rm.returncode != 0:
+        logger.debug("beet remove returned %d (may not have been cataloged)",
+                     rm.returncode)
+
+    # Delete source file(s).
+    if path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+    elif path.is_file():
+        path.unlink(missing_ok=True)
+        _clean_sidecars(path)
+
+    logger.info("Import complete: %s", path)
 
 
 def _clean_sidecars(audio_path: Path) -> None:

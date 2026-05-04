@@ -117,6 +117,30 @@ def catalog_path(
     return result
 
 
+def modify_item(
+    config: Config, path: Path, tags: dict[str, Any]
+) -> subprocess.CompletedProcess[str]:
+    """Update tags for a file or directory in the inbox beets DB.
+
+    For a directory, applies the tags to all items under it.
+    """
+    set_args = [f"{k}={v}" for k, v in tags.items() if v is not None]
+    if not set_args:
+        return subprocess.CompletedProcess([], 0, "", "")
+    query = f"path:{path}/" if path.is_dir() else f"path:{path}"
+    result = _beet(
+        config.beets_inbox_config,
+        "modify", "-y", *set_args, query,
+        check=False,
+    )
+    if result.returncode != 0:
+        logger.warning(
+            "beet modify failed rc=%d  %s\n  stderr: %s",
+            result.returncode, path, result.stderr.strip() or "(empty)",
+        )
+    return result
+
+
 def remove_from_inbox(config: Config, path: Path) -> subprocess.CompletedProcess[str]:
     """Remove a file's entry (or all entries under a directory) from the inbox DB.
 
@@ -195,6 +219,39 @@ def _beets_path(config: Config, file_path: Path) -> bytes:
         return str(rel).encode()
     except ValueError:
         return str(file_path).encode()
+
+
+def query_all_inbox_tags(config: Config) -> dict[str, dict[str, Any]]:
+    """Return {absolute_path_str: tags_dict} for every file in the inbox beets DB.
+
+    One DB query for the whole inbox — callers use this instead of calling
+    query_item_tags per file.
+    """
+    con = _inbox_conn(config)
+    if con is None:
+        return {}
+    try:
+        schema_rows = con.execute("PRAGMA table_info(items)").fetchall()
+        existing = {r["name"] for r in schema_rows}
+        db_cols = sorted(col for col in _WANTED_TAGS if col in existing)
+        col_sql = ", ".join(["path", *db_cols]) if db_cols else "path"
+        rows = con.execute(f"SELECT {col_sql} FROM items").fetchall()  # noqa: S608
+        result: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            p_raw = row["path"]
+            raw = p_raw.decode() if isinstance(p_raw, bytes) else p_raw
+            p = Path(raw)
+            if not p.is_absolute():
+                p = config.inbox_path / p
+            tags: dict[str, Any] = {
+                _WANTED_TAGS[col]: row[col]
+                for col in db_cols
+                if row[col] is not None and row[col] != ""
+            }
+            result[str(p)] = tags
+        return result
+    finally:
+        con.close()
 
 
 def query_item_tags(config: Config, file_path: Path) -> dict[str, Any]:

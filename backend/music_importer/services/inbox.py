@@ -17,7 +17,7 @@ from watchdog.observers import Observer
 from watchdog.observers.api import BaseObserver
 
 from ..config import Config
-from ..models import InboxItem
+from ..models import InboxItem, TrackInfo
 from . import beets as beets_svc
 
 logger = logging.getLogger(__name__)
@@ -132,16 +132,15 @@ def _build_item(
     category: str,
     is_group: bool,
     audio_files: list[Path],
-    cataloged_paths: set[str],
+    all_tags: dict[str, dict[str, Any]],
 ) -> InboxItem:
     item_id = path_to_id(config.inbox_path, item_path)
     primary = audio_files[0] if audio_files else item_path
 
     # Item is cataloged once beets has processed it and stored it in the DB.
-    cataloged = str(primary) in cataloged_paths
-    tags: dict[str, Any] = (
-        beets_svc.query_item_tags(config, primary) if cataloged else {}
-    )
+    primary_key = str(primary)
+    cataloged = primary_key in all_tags
+    tags: dict[str, Any] = all_tags.get(primary_key, {})
 
     # Enrich with sidecar (only for single files)
     sidecar_data: dict[str, str] = {}
@@ -149,6 +148,22 @@ def _build_item(
         sidecar_data = _parse_sidecar(item_path)
         if not tags.get("title") and sidecar_data.get("title"):
             tags["title"] = sidecar_data["title"]
+
+    # Build per-track list for album groups.
+    tracks: list[TrackInfo] = []
+    if is_group:
+        for f in audio_files:
+            f_tags = all_tags.get(str(f), {})
+            tracks.append(TrackInfo(
+                id=path_to_id(config.inbox_path, f),
+                path=str(f),
+                title=f_tags.get("title"),
+                artist=f_tags.get("artist"),
+                albumartist=f_tags.get("albumartist"),
+                genre=f_tags.get("genre"),
+                year=f_tags.get("year"),
+                track=f_tags.get("track"),
+            ))
 
     return InboxItem(
         id=item_id,
@@ -167,6 +182,7 @@ def _build_item(
         source_url=sidecar_data.get("source_url"),
         uploader=sidecar_data.get("uploader"),
         upload_date=sidecar_data.get("upload_date"),
+        tracks=tracks,
     )
 
 
@@ -178,11 +194,11 @@ def scan_inbox(config: Config) -> list[InboxItem]:
     if not inbox.exists():
         return items
 
-    # Fetch cataloged paths once so every _build_item call shares one DB query.
-    cataloged_paths = beets_svc.query_all_inbox_paths(config)
+    # One DB query for the whole inbox; every _build_item call shares the result.
+    all_tags = beets_svc.query_all_inbox_tags(config)
 
     def mk(path: Path, cat: str, group: bool, files: list[Path]) -> InboxItem:
-        return _build_item(config, path, cat, group, files, cataloged_paths)
+        return _build_item(config, path, cat, group, files, all_tags)
 
     for category_dir in sorted(inbox.iterdir()):
         if not category_dir.is_dir():
@@ -218,10 +234,10 @@ def get_item(config: Config, item_id: str) -> InboxItem | None:
     except (ValueError, IndexError):
         return None
 
-    cataloged_paths = beets_svc.query_all_inbox_paths(config)
+    all_tags = beets_svc.query_all_inbox_tags(config)
 
     def mk(path: Path, group: bool, files: list[Path]) -> InboxItem:
-        return _build_item(config, path, category, group, files, cataloged_paths)
+        return _build_item(config, path, category, group, files, all_tags)
 
     if item_path.is_file() and is_audio(item_path):
         return mk(item_path, False, [item_path])

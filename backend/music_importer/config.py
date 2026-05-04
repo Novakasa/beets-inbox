@@ -31,10 +31,6 @@ class Config:
     def beets_main_db(self) -> Path:
         return self.data_path / "main-beets.db"
 
-    @property
-    def jobs_db(self) -> Path:
-        return self.data_path / "jobs.db"
-
 
 def load_config() -> Config:
     inbox_path = Path(os.environ["BEETS_INBOX_PATH"])

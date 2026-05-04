@@ -2,9 +2,8 @@ module Api exposing
     ( discardItem
     , getCategories
     , getInbox
-    , getJob
-    , getJobs
     , importItem
+    , updateItem
     , uploadFiles
     )
 
@@ -35,12 +34,33 @@ getCategories toMsg =
         }
 
 
-importItem : String -> ImportRequest -> (Result Http.Error Job -> msg) -> Cmd msg
-importItem itemId req toMsg =
-    Http.post
-        { url = base ++ "/inbox/" ++ itemId ++ "/import"
-        , body = Http.jsonBody (encodeImportRequest req)
-        , expect = Http.expectJson toMsg jobDecoder
+{-| Save edited tags to the beets inbox DB (PATCH).
+-}
+updateItem : String -> TagUpdate -> (Result Http.Error () -> msg) -> Cmd msg
+updateItem itemId update toMsg =
+    Http.request
+        { method = "PATCH"
+        , headers = []
+        , url = base ++ "/inbox/" ++ itemId
+        , body = Http.jsonBody (encodeTagUpdate update)
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Trigger import of an inbox item using its current beets DB tags.
+-}
+importItem : String -> (Result Http.Error () -> msg) -> Cmd msg
+importItem itemId toMsg =
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = base ++ "/inbox/" ++ itemId ++ "/import"
+        , body = Http.emptyBody
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
         }
 
 
@@ -91,20 +111,4 @@ uploadFiles category autotag files toMsg =
         , expect = Http.expectWhatever toMsg
         , timeout = Nothing
         , tracker = Nothing
-        }
-
-
-getJobs : (Result Http.Error (List Job) -> msg) -> Cmd msg
-getJobs toMsg =
-    Http.get
-        { url = base ++ "/jobs"
-        , expect = Http.expectJson toMsg (D.list jobDecoder)
-        }
-
-
-getJob : String -> (Result Http.Error Job -> msg) -> Cmd msg
-getJob jobId toMsg =
-    Http.get
-        { url = base ++ "/jobs/" ++ jobId
-        , expect = Http.expectJson toMsg jobDecoder
         }

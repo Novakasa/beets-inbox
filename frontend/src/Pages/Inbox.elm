@@ -18,7 +18,7 @@ type alias Model =
     , categories : List String
     , loading : Bool
     , error : Maybe String
-    , editing : Maybe ( String, EditForm ) -- (item id, draft)
+    , editing : Maybe ( String, EditForm )  -- (item id, draft)
     , filterCategory : Maybe String
     , pendingFiles : List File
     , uploadCategory : String
@@ -38,8 +38,10 @@ type Msg
     | StartEdit InboxItem
     | CancelEdit
     | UpdateForm (EditForm -> EditForm)
-    | SubmitImport String
-    | GotImportResult String (Result Http.Error Job)
+    | SaveAndImport String      -- PATCH tags then import
+    | ImportAsIs String         -- import immediately without editing
+    | GotSaveResult String (Result Http.Error ())
+    | GotImportResult String (Result Http.Error ())
     | Discard String
     | GotDiscardResult String (Result Http.Error ())
     | PickFiles
@@ -122,14 +124,13 @@ update msg model =
                 Nothing ->
                     ( model, Cmd.none )
 
-        SubmitImport itemId ->
+        SaveAndImport itemId ->
             case model.editing of
                 Just ( editId, form ) ->
                     if editId == itemId then
+                        -- PATCH tags first; import fires in GotSaveResult
                         ( model
-                        , Api.importItem itemId
-                            (formToImportRequest form)
-                            (GotImportResult itemId)
+                        , Api.updateItem itemId (formToTagUpdate form) (GotSaveResult itemId)
                         )
 
                     else
@@ -138,16 +139,25 @@ update msg model =
                 Nothing ->
                     ( model, Cmd.none )
 
+        GotSaveResult itemId (Ok _) ->
+            -- Tags saved; now trigger the import
+            ( { model | editing = Nothing }
+            , Api.importItem itemId (GotImportResult itemId)
+            )
+
+        GotSaveResult _ (Err err) ->
+            ( { model | error = Just ("Save failed: " ++ httpErrorToString err) }, Cmd.none )
+
+        ImportAsIs itemId ->
+            ( model, Api.importItem itemId (GotImportResult itemId) )
+
         GotImportResult itemId (Ok _) ->
-            ( { model
-                | items = List.filter (\i -> i.id /= itemId) model.items
-                , editing = Nothing
-              }
+            ( { model | items = List.filter (\i -> i.id /= itemId) model.items }
             , Cmd.none
             )
 
         GotImportResult _ (Err err) ->
-            ( { model | error = Just (httpErrorToString err) }, Cmd.none )
+            ( { model | error = Just ("Import failed: " ++ httpErrorToString err) }, Cmd.none )
 
         Discard itemId ->
             ( model, Api.discardItem itemId (GotDiscardResult itemId) )
@@ -347,9 +357,17 @@ viewItemRow item =
             [ div [ class "item-info" ]
                 [ span [ class "item-name" ] [ text (displayName item) ]
                 , viewTagSummary item
+                , if item.isGroup then
+                    viewTrackList item.tracks
+
+                  else
+                    text ""
                 ]
             , div [ class "item-actions" ]
                 [ button
+                    [ onClick (ImportAsIs item.id), class "btn" ]
+                    [ text "Import as-is" ]
+                , button
                     [ onClick (StartEdit item), class "btn btn-primary" ]
                     [ text "Edit & Import" ]
                 , button
@@ -365,12 +383,38 @@ viewItemRow item =
                 , span [ class "tag-summary cataloging-msg" ] [ text "Cataloging…" ]
                 ]
             , div [ class "item-actions" ]
-                [ button [ class "btn btn-primary", disabled True ] [ text "Edit & Import" ]
+                [ button [ class "btn", disabled True ] [ text "Import as-is" ]
+                , button [ class "btn btn-primary", disabled True ] [ text "Edit & Import" ]
                 , button
                     [ onClick (Discard item.id), class "btn btn-danger" ]
                     [ text "Discard" ]
                 ]
             ]
+
+
+viewTrackList : List TrackInfo -> Html Msg
+viewTrackList tracks =
+    if List.isEmpty tracks then
+        text ""
+
+    else
+        ol [ class "track-list" ]
+            (List.map viewTrack (List.sortBy (.track >> Maybe.withDefault 999) tracks))
+
+
+viewTrack : TrackInfo -> Html Msg
+viewTrack track =
+    li [ class "track-item" ]
+        [ span [ class "track-num" ]
+            [ text
+                (track.track
+                    |> Maybe.map (\n -> String.fromInt n ++ ".")
+                    |> Maybe.withDefault "–."
+                )
+            ]
+        , span [ class "track-title" ]
+            [ text (Maybe.withDefault "(untitled)" track.title) ]
+        ]
 
 
 viewTagSummary : InboxItem -> Html Msg
@@ -380,7 +424,6 @@ viewTagSummary item =
             List.filterMap identity
                 [ Maybe.map (\v -> "artist: " ++ v) item.artist
                 , Maybe.map (\v -> "album: " ++ v) item.album
-                , Maybe.map (\v -> "title: " ++ v) item.title
                 , Maybe.map (\v -> "year: " ++ String.fromInt v) item.year
                 , Maybe.map (\v -> "uploader: " ++ v) item.uploader
                 ]
@@ -397,18 +440,26 @@ viewEditForm item form =
     div [ class "item-edit" ]
         [ p [ class "item-name" ] [ text (displayName item) ]
         , div [ class "edit-fields" ]
-            [ fieldInput "Title" form.title (\v -> UpdateForm (\f -> { f | title = v }))
-            , fieldInput "Artist" form.artist (\v -> UpdateForm (\f -> { f | artist = v }))
-            , fieldInput "Album" form.album (\v -> UpdateForm (\f -> { f | album = v }))
+            [ fieldInput "Artist" form.artist (\v -> UpdateForm (\f -> { f | artist = v }))
             , fieldInput "Album artist" form.albumartist (\v -> UpdateForm (\f -> { f | albumartist = v }))
+            , fieldInput "Album" form.album (\v -> UpdateForm (\f -> { f | album = v }))
             , fieldInput "Genre" form.genre (\v -> UpdateForm (\f -> { f | genre = v }))
             , fieldInput "Year" form.year (\v -> UpdateForm (\f -> { f | year = v }))
+            , if not item.isGroup then
+                fieldInput "Title" form.title (\v -> UpdateForm (\f -> { f | title = v }))
+
+              else
+                text ""
             ]
-        , viewSidecarInfo item
+        , if item.isGroup then
+            viewTrackList item.tracks
+
+          else
+            viewSidecarInfo item
         , div [ class "edit-actions" ]
             [ button
-                [ onClick (SubmitImport item.id), class "btn btn-primary" ]
-                [ text "Import" ]
+                [ onClick (SaveAndImport item.id), class "btn btn-primary" ]
+                [ text "Save & Import" ]
             , button
                 [ onClick CancelEdit, class "btn" ]
                 [ text "Cancel" ]
@@ -475,7 +526,6 @@ displayName item =
 groupByCategory : List InboxItem -> List ( String, List InboxItem )
 groupByCategory items =
     let
-        -- Preserve insertion order of categories
         cats =
             List.foldr
                 (\item acc ->

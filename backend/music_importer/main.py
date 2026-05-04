@@ -9,9 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import db as db_mod
 from .api import inbox as inbox_api
-from .api import jobs as jobs_api
 from .config import load_config
 from .services import beets as beets_svc
 from .services.inbox import InboxWatcher
@@ -34,12 +32,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if config.library_path is not None:
         beets_svc.write_main_config(config, config.library_path)
 
-    # Initialize job DB
-    db_mod.init_db(config.jobs_db)
-
-    # Wire API routers
+    # Wire API router
     inbox_api.init(config)
-    jobs_api.init(config)
 
     # Start inbox watcher
     watcher = InboxWatcher(config)
@@ -57,7 +51,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(title="beets-inbox", lifespan=lifespan)
 
 app.include_router(inbox_api.router)
-app.include_router(jobs_api.router)
 
 # Serve Elm frontend — only mount if the dist directory exists
 if _STATIC_DIR.exists():
