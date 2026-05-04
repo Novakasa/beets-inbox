@@ -86,10 +86,19 @@ def catalog_path(config: Config, path: Path) -> subprocess.CompletedProcess[str]
 
 
 def remove_from_inbox(config: Config, path: Path) -> subprocess.CompletedProcess[str]:
-    """Remove a file's entry from the inbox DB and delete the source file."""
+    """Remove a file's entry (or all entries under a directory) from the inbox DB.
+
+    Does NOT delete the source file — callers are responsible for that so the
+    cleanup happens even when the item was never cataloged in the inbox DB.
+    """
+    if path.is_dir():
+        # Match all items whose path starts with this directory
+        query = f"path:{path}/"
+    else:
+        query = f"path:{path}"
     return _beet(
         config.beets_inbox_config,
-        "remove", "-d", "-f", f"path:{path}",
+        "remove", "-f", query,
         check=False,
     )
 
@@ -134,22 +143,45 @@ def _inbox_conn(config: Config) -> sqlite3.Connection | None:
     return con
 
 
+_WANTED_TAGS = {"title", "artist", "album", "albumartist", "genre", "year", "track"}
+
+
 def query_item_tags(config: Config, file_path: Path) -> dict[str, Any]:
-    """Return tag dict for a specific file from the inbox beets DB."""
+    """Return tag dict for a specific file from the inbox beets DB.
+
+    We only select columns that both exist in the DB schema and are in
+    _WANTED_TAGS — the beets schema varies across versions and configurations.
+    """
     con = _inbox_conn(config)
     if con is None:
         return {}
     try:
-        # beets stores paths as bytes blobs
-        path_bytes = str(file_path).encode()
+        # Discover which columns actually exist in this DB's items table.
+        schema_rows = con.execute("PRAGMA table_info(items)").fetchall()
+        existing = {r["name"] for r in schema_rows}
+        cols = sorted(_WANTED_TAGS & existing)
+        if not cols:
+            return {}
+
+        col_sql = ", ".join(cols)
+
+        # beets stores paths as bytes blobs; try exact match first, then suffix
+        # match in case beets normalised or resolved symlinks in the stored path.
+        path_str = str(file_path)
+        path_bytes = path_str.encode()
         row = con.execute(
-            """SELECT title, artist, album, albumartist, genre, year, track
-               FROM items WHERE path = ?""",
+            f"SELECT {col_sql} FROM items WHERE path = ?",  # noqa: S608
             (path_bytes,),
         ).fetchone()
         if row is None:
+            # Fallback: match by the filename suffix (handles minor path differences)
+            row = con.execute(
+                f"SELECT {col_sql} FROM items WHERE path LIKE ?",  # noqa: S608
+                (f"%{path_str}".encode(),),
+            ).fetchone()
+        if row is None:
             return {}
-        return {k: row[k] for k in row if row[k] is not None and row[k] != ""}
+        return {k: row[k] for k in cols if row[k] is not None and row[k] != ""}
     finally:
         con.close()
 

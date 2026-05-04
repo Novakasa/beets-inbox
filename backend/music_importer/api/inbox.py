@@ -172,19 +172,22 @@ def _run_import(
             log_lines.append(f"stderr: {result.stderr}\n")
             raise RuntimeError(f"beet import failed (rc={result.returncode})")
 
-        # 2. Remove from inbox DB + delete source file
-        log_lines.append("Removing from inbox...\n")
+        # 2. Remove from inbox beets DB (best-effort — item may not have been
+        #    cataloged yet if the user imported immediately after uploading).
+        log_lines.append("Removing from inbox DB...\n")
         rm_result = beets_svc.remove_from_inbox(config, path)
-        log_lines.append(rm_result.stdout)
         if rm_result.returncode != 0:
-            logger.warning(
-                "beet remove returned %d: %s",
+            logger.debug(
+                "beet remove returned %d (item may not have been cataloged): %s",
                 rm_result.returncode,
                 rm_result.stderr,
             )
 
-        # 3. Clean up sidecar files
-        if not item.is_group:
+        # 3. Delete source file(s) — explicit, not relying on `beet remove -d`
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        elif path.is_file():
+            path.unlink(missing_ok=True)
             _clean_sidecars(path)
 
         db_mod.update_job(

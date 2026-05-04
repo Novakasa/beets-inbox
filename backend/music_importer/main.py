@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 
 # Static files are built by Elm and placed here at build time (or served
 # from a dev server during development).
-_STATIC_DIR = Path(__file__).parent.parent / "frontend" / "dist"
+# backend/music_importer/main.py → backend/ → repo root → frontend/dist
+_STATIC_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
 
 @asynccontextmanager
@@ -30,6 +31,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Ensure beets configs exist
     beets_svc.write_inbox_config(config)
+    if config.library_path is not None:
+        beets_svc.write_main_config(config, config.library_path)
 
     # Initialize job DB
     db_mod.init_db(config.jobs_db)

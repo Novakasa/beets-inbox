@@ -246,6 +246,9 @@ class InboxWatcher:
         self._stop_event = threading.Event()
 
     def _on_new_file(self, path: Path) -> None:
+        if not path.exists():
+            # File was deleted before the debounce fired (e.g. already imported).
+            return
         logger.info("Cataloging new file: %s", path)
         result = beets_svc.catalog_path(self._config, path)
         if result.returncode != 0:
