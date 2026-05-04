@@ -28,6 +28,7 @@
 
             # Tools
             pkgs.sqlite
+            pkgs.just
           ];
 
           shellHook = ''
