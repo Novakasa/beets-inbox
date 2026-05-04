@@ -55,6 +55,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "mutagen" },
     { name = "python-multipart" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "watchdog" },
@@ -69,7 +70,6 @@ dev = [
 [package.dev-dependencies]
 dev = [
     { name = "basedpyright" },
-    { name = "mutagen" },
     { name = "ruff" },
     { name = "ty" },
 ]
@@ -77,6 +77,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "mutagen", specifier = ">=1.47" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
     { name = "python-multipart", specifier = ">=0.0.18" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
@@ -88,7 +89,6 @@ provides-extras = ["dev"]
 [package.metadata.requires-dev]
 dev = [
     { name = "basedpyright", specifier = ">=1.39.3" },
-    { name = "mutagen", specifier = ">=1.47" },
     { name = "ruff", specifier = ">=0.15.12" },
     { name = "ty", specifier = ">=0.0.34" },
 ]

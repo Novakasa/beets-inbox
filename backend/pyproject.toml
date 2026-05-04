@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn[standard]>=0.34",
     "watchdog>=6.0",
     "python-multipart>=0.0.18",
+    "mutagen>=1.47",
 ]
 
 [project.optional-dependencies]
@@ -36,7 +37,6 @@ select = ["E", "F", "I", "N", "UP", "B", "A", "SIM"]
 [dependency-groups]
 dev = [
     "basedpyright>=1.39.3",
-    "mutagen>=1.47",
     "ruff>=0.15.12",
     "ty>=0.0.34",
 ]

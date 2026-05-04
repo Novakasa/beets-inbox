@@ -139,14 +139,25 @@ def _inbox_conn(config: Config) -> sqlite3.Connection | None:
     return con
 
 
-_WANTED_TAGS = {"title", "artist", "album", "albumartist", "genre", "year", "track"}
+# Beets DB column names we care about → the key name we expose in the tag dict.
+# Note: beets uses "genres" (plural) for what we surface as "genre".
+_WANTED_TAGS: dict[str, str] = {
+    "title": "title",
+    "artist": "artist",
+    "album": "album",
+    "albumartist": "albumartist",
+    "genres": "genre",
+    "year": "year",
+    "track": "track",
+}
 
 
 def query_item_tags(config: Config, file_path: Path) -> dict[str, Any]:
     """Return tag dict for a specific file from the inbox beets DB.
 
-    We only select columns that both exist in the DB schema and are in
-    _WANTED_TAGS — the beets schema varies across versions and configurations.
+    Only selects columns that exist in the DB schema (beets schema varies
+    across versions). Maps beets column names to the keys the app uses
+    (e.g. 'genres' → 'genre').
     """
     con = _inbox_conn(config)
     if con is None:
@@ -155,14 +166,14 @@ def query_item_tags(config: Config, file_path: Path) -> dict[str, Any]:
         # Discover which columns actually exist in this DB's items table.
         schema_rows = con.execute("PRAGMA table_info(items)").fetchall()
         existing = {r["name"] for r in schema_rows}
-        cols = sorted(_WANTED_TAGS & existing)
-        if not cols:
+        db_cols = sorted(col for col in _WANTED_TAGS if col in existing)
+        if not db_cols:
             return {}
 
-        col_sql = ", ".join(cols)
+        col_sql = ", ".join(db_cols)
 
-        # beets stores paths as bytes blobs; try exact match first, then suffix
-        # match in case beets normalised or resolved symlinks in the stored path.
+        # beets stores paths as bytes blobs; try exact match first, then a
+        # suffix LIKE in case beets normalised or resolved symlinks.
         path_str = str(file_path)
         path_bytes = path_str.encode()
         row = con.execute(
@@ -170,14 +181,17 @@ def query_item_tags(config: Config, file_path: Path) -> dict[str, Any]:
             (path_bytes,),
         ).fetchone()
         if row is None:
-            # Fallback: match by the filename suffix (handles minor path differences)
             row = con.execute(
                 f"SELECT {col_sql} FROM items WHERE path LIKE ?",  # noqa: S608
                 (f"%{path_str}".encode(),),
             ).fetchone()
         if row is None:
             return {}
-        return {k: row[k] for k in cols if row[k] is not None and row[k] != ""}
+        return {
+            _WANTED_TAGS[col]: row[col]
+            for col in db_cols
+            if row[col] is not None and row[col] != ""
+        }
     finally:
         con.close()
 

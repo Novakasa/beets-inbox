@@ -1,6 +1,7 @@
 """Inbox directory scanner, sidecar parser, and file watcher."""
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import threading
@@ -9,6 +10,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, override
 
+import mutagen
+import mutagen._file
 from watchdog.events import FileCreatedEvent, FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 from watchdog.observers.api import BaseObserver
@@ -77,6 +80,50 @@ def _parse_sidecar(audio_path: Path) -> dict[str, str]:
         return {}
 
 
+# ── Tag reader ───────────────────────────────────────────────────────────────
+
+def _read_file_tags(path: Path) -> dict[str, Any]:
+    """Read embedded tags directly from an audio file using mutagen.
+
+    Returns a dict with keys: title, artist, album, albumartist, genre, year,
+    track.  Works immediately — no beets cataloging required.
+    """
+    try:
+        audio = mutagen._file.File(str(path), easy=True)  # noqa: SLF001
+    except Exception:
+        return {}
+    if audio is None or not audio.tags:
+        return {}
+
+    def first(key: str) -> str | None:
+        vals = audio.tags.get(key)  # type: ignore[union-attr]
+        return str(vals[0]) if vals else None
+
+    result: dict[str, Any] = {}
+    for src, dst in [
+        ("title", "title"),
+        ("artist", "artist"),
+        ("album", "album"),
+        ("albumartist", "albumartist"),
+        ("genre", "genre"),
+    ]:
+        val = first(src)
+        if val:
+            result[dst] = val
+
+    # date/tracknumber need normalisation
+    date = first("date")
+    if date:
+        result["year"] = date[:4]  # "2024-01-01" → "2024"
+
+    tracknum = first("tracknumber")
+    if tracknum:
+        with contextlib.suppress(ValueError):
+            result["track"] = int(tracknum.split("/")[0])
+
+    return result
+
+
 # ── Scanner ───────────────────────────────────────────────────────────────────
 
 def _build_item(
@@ -88,15 +135,14 @@ def _build_item(
 ) -> InboxItem:
     item_id = path_to_id(config.inbox_path, item_path)
 
-    # Collect tags from beets DB (use first audio file for single or group)
+    # Read tags directly from the file — no beets cataloging needed.
     primary = audio_files[0] if audio_files else item_path
-    tags: dict[str, Any] = beets_svc.query_item_tags(config, primary)
+    tags: dict[str, Any] = _read_file_tags(primary)
 
     # Enrich with sidecar (only for single files)
     sidecar_data: dict[str, str] = {}
     if not is_group:
         sidecar_data = _parse_sidecar(item_path)
-        # Sidecar title fills gap but doesn't override a beets match
         if not tags.get("title") and sidecar_data.get("title"):
             tags["title"] = sidecar_data["title"]
 
