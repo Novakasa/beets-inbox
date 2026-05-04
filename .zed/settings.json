@@ -1,0 +1,61 @@
+{
+  "tab_size": 4,
+  "format_on_save": "on",
+
+  "languages": {
+    "Python": {
+      "language_servers": ["basedpyright", "ruff"],
+      "formatter": {
+        "language_server": { "name": "ruff" }
+      }
+    },
+    "Elm": {
+      "language_servers": ["elm-language-server"],
+      "formatter": {
+        "external": {
+          "command": "elm-format",
+          "arguments": ["--stdin"]
+        }
+      }
+    },
+    "Nix": {
+      "tab_size": 2,
+      "formatter": {
+        "external": {
+          "command": "nixpkgs-fmt"
+        }
+      }
+    },
+    "JSON": {
+      "tab_size": 2
+    },
+    "TOML": {
+      "tab_size": 2
+    }
+  },
+
+  "lsp": {
+    "basedpyright": {
+      "settings": {
+        "basedpyright": {
+          "analysis": {
+            "typeCheckingMode": "standard"
+          }
+        },
+        "python": {
+          "pythonPath": "backend/.venv/bin/python"
+        }
+      }
+    },
+    "ruff": {
+      "initialization_options": {
+        "settings": {
+          "lineLength": 88,
+          "lint": {
+            "select": ["E", "F", "I", "N", "UP", "B", "A", "SIM"]
+          }
+        }
+      }
+    }
+  }
+}
