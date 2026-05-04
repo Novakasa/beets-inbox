@@ -99,23 +99,21 @@ def catalog_path(
     """
     no_autotag = [] if autotag else ["-A"]
     singleton = ["-s"] if path.is_file() else []
+    verbose = ["-v"] if autotag else []
     logger.info("catalog_path start  autotag=%-5s  %s", autotag, path)
     result = _beet(
         config.beets_inbox_config,
-        "import", "-q", *no_autotag, *singleton, str(path),
+        *verbose, "import", "-q", *no_autotag, *singleton, str(path),
         check=False,
     )
     if result.returncode == 0:
         logger.info("catalog_path done   rc=0          %s", path)
     else:
-        logger.warning(
-            "catalog_path failed rc=%d          %s\n  stdout: %s\n  stderr: %s",
-            result.returncode, path,
-            result.stdout.strip() or "(empty)",
-            result.stderr.strip() or "(empty)",
-        )
+        logger.warning("catalog_path failed rc=%d          %s", result.returncode, path)
     if result.stdout.strip():
-        logger.debug("beet stdout: %s", result.stdout.strip())
+        logger.info("beet stdout:\n%s", result.stdout.strip())
+    if result.stderr.strip():
+        logger.info("beet stderr:\n%s", result.stderr.strip())
     return result
 
 
