@@ -22,6 +22,7 @@ type alias Model =
     , filterCategory : Maybe String
     , pendingFiles : List File
     , uploadCategory : String
+    , uploadAutotag : Bool
     , uploading : Bool
     , uploadError : Maybe String
     }
@@ -47,6 +48,7 @@ type Msg
     | Upload
     | GotUploadResult (Result Http.Error ())
     | SetFilter (Maybe String)
+    | SetAutotag Bool
 
 
 -- ── Init ──────────────────────────────────────────────────────────────────────
@@ -62,6 +64,7 @@ init =
       , filterCategory = Nothing
       , pendingFiles = []
       , uploadCategory = ""
+      , uploadAutotag = True
       , uploading = False
       , uploadError = Nothing
       }
@@ -174,7 +177,7 @@ update msg model =
 
             else
                 ( { model | uploading = True, uploadError = Nothing }
-                , Api.uploadFiles model.uploadCategory model.pendingFiles GotUploadResult
+                , Api.uploadFiles model.uploadCategory model.uploadAutotag model.pendingFiles GotUploadResult
                 )
 
         GotUploadResult (Ok _) ->
@@ -189,6 +192,9 @@ update msg model =
 
         SetFilter cat ->
             ( { model | filterCategory = cat }, Cmd.none )
+
+        SetAutotag val ->
+            ( { model | uploadAutotag = val }, Cmd.none )
 
 
 -- ── View ──────────────────────────────────────────────────────────────────────
@@ -243,6 +249,15 @@ viewUploadSection model =
                      else
                         "Upload"
                     )
+                ]
+            , label [ class "autotag-label" ]
+                [ input
+                    [ type_ "checkbox"
+                    , checked model.uploadAutotag
+                    , onCheck SetAutotag
+                    ]
+                    []
+                , text " Auto-tag with MusicBrainz"
                 ]
             ]
         , case model.uploadError of
@@ -327,20 +342,35 @@ viewItem editing item =
 
 viewItemRow : InboxItem -> Html Msg
 viewItemRow item =
-    div [ class "item-row" ]
-        [ div [ class "item-info" ]
-            [ span [ class "item-name" ] [ text (displayName item) ]
-            , viewTagSummary item
+    if item.cataloged then
+        div [ class "item-row" ]
+            [ div [ class "item-info" ]
+                [ span [ class "item-name" ] [ text (displayName item) ]
+                , viewTagSummary item
+                ]
+            , div [ class "item-actions" ]
+                [ button
+                    [ onClick (StartEdit item), class "btn btn-primary" ]
+                    [ text "Edit & Import" ]
+                , button
+                    [ onClick (Discard item.id), class "btn btn-danger" ]
+                    [ text "Discard" ]
+                ]
             ]
-        , div [ class "item-actions" ]
-            [ button
-                [ onClick (StartEdit item), class "btn btn-primary" ]
-                [ text "Edit & Import" ]
-            , button
-                [ onClick (Discard item.id), class "btn btn-danger" ]
-                [ text "Discard" ]
+
+    else
+        div [ class "item-row item-row--cataloging" ]
+            [ div [ class "item-info" ]
+                [ span [ class "item-name" ] [ text (displayName item) ]
+                , span [ class "tag-summary cataloging-msg" ] [ text "Cataloging…" ]
+                ]
+            , div [ class "item-actions" ]
+                [ button [ class "btn btn-primary", disabled True ] [ text "Edit & Import" ]
+                , button
+                    [ onClick (Discard item.id), class "btn btn-danger" ]
+                    [ text "Discard" ]
+                ]
             ]
-        ]
 
 
 viewTagSummary : InboxItem -> Html Msg

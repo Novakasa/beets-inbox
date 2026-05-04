@@ -14,6 +14,10 @@ _default:
 sync:
     cd backend && uv sync
 
+# Run tests
+test: sync
+    cd backend && uv run pytest tests/ -v
+
 # Run all linters (ruff + ty + basedpyright)
 check: sync
     cd backend && uv run ruff check music_importer

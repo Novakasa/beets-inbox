@@ -1,12 +1,15 @@
 """Beets CLI wrapper and inbox DB reader."""
 from __future__ import annotations
 
+import logging
 import sqlite3
 import subprocess
 from pathlib import Path
 from typing import Any
 
 from ..config import Config
+
+logger = logging.getLogger(__name__)
 
 # ── Config generation ──────────────────────────────────────────────────────────
 
@@ -22,6 +25,9 @@ import:
   timid: false
   # Accept files even if no MusicBrainz match is found
   none: true
+  # In quiet mode, fall back to embedded tags rather than skipping when
+  # MusicBrainz confidence is below the auto-accept threshold
+  quiet_fallback: asis
 
 plugins: []
 """
@@ -78,11 +84,39 @@ def _beet(
 
 # ── Inbox operations ──────────────────────────────────────────────────────────
 
-def catalog_path(config: Config, path: Path) -> subprocess.CompletedProcess[str]:
-    """Run inbox import on a file or directory (no copy/move/write)."""
-    return _beet(
-        config.beets_inbox_config, "import", "-A", "-q", str(path), check=False
+def catalog_path(
+    config: Config, path: Path, *, autotag: bool = True
+) -> subprocess.CompletedProcess[str]:
+    """Run inbox import on a file or directory (no copy/move/write).
+
+    When autotag=True beets queries MusicBrainz and auto-accepts the best
+    match in quiet mode.  When False, -A skips the lookup entirely.
+
+    When path is a single file, --singleton (-s) is passed so beets does not
+    group the file with siblings in the same directory.  When path is a
+    directory, beets groups all files inside it as an album (the normal case
+    for ZIP-extracted albums).
+    """
+    no_autotag = [] if autotag else ["-A"]
+    singleton = ["-s"] if path.is_file() else []
+    logger.info("catalog_path start  autotag=%-5s  %s", autotag, path)
+    result = _beet(
+        config.beets_inbox_config,
+        "import", "-q", *no_autotag, *singleton, str(path),
+        check=False,
     )
+    if result.returncode == 0:
+        logger.info("catalog_path done   rc=0          %s", path)
+    else:
+        logger.warning(
+            "catalog_path failed rc=%d          %s\n  stdout: %s\n  stderr: %s",
+            result.returncode, path,
+            result.stdout.strip() or "(empty)",
+            result.stderr.strip() or "(empty)",
+        )
+    if result.stdout.strip():
+        logger.debug("beet stdout: %s", result.stdout.strip())
+    return result
 
 
 def remove_from_inbox(config: Config, path: Path) -> subprocess.CompletedProcess[str]:
@@ -152,6 +186,19 @@ _WANTED_TAGS: dict[str, str] = {
 }
 
 
+def _beets_path(config: Config, file_path: Path) -> bytes:
+    """Return the path bytes as beets stores them in the DB.
+
+    Beets stores paths relative to the library 'directory' when the file is
+    inside it, and as absolute paths otherwise.
+    """
+    try:
+        rel = file_path.relative_to(config.inbox_path)
+        return str(rel).encode()
+    except ValueError:
+        return str(file_path).encode()
+
+
 def query_item_tags(config: Config, file_path: Path) -> dict[str, Any]:
     """Return tag dict for a specific file from the inbox beets DB.
 
@@ -171,20 +218,11 @@ def query_item_tags(config: Config, file_path: Path) -> dict[str, Any]:
             return {}
 
         col_sql = ", ".join(db_cols)
-
-        # beets stores paths as bytes blobs; try exact match first, then a
-        # suffix LIKE in case beets normalised or resolved symlinks.
-        path_str = str(file_path)
-        path_bytes = path_str.encode()
+        path_bytes = _beets_path(config, file_path)
         row = con.execute(
             f"SELECT {col_sql} FROM items WHERE path = ?",  # noqa: S608
             (path_bytes,),
         ).fetchone()
-        if row is None:
-            row = con.execute(
-                f"SELECT {col_sql} FROM items WHERE path LIKE ?",  # noqa: S608
-                (f"%{path_str}".encode(),),
-            ).fetchone()
         if row is None:
             return {}
         return {
@@ -197,15 +235,24 @@ def query_item_tags(config: Config, file_path: Path) -> dict[str, Any]:
 
 
 def query_all_inbox_paths(config: Config) -> set[str]:
-    """Return the set of all file paths currently in the inbox beets DB."""
+    """Return absolute path strings for all files in the inbox beets DB.
+
+    Beets stores paths relative to the library directory for in-library files,
+    so we resolve them back to absolute paths for consistent comparison.
+    """
     con = _inbox_conn(config)
     if con is None:
         return set()
     try:
         rows = con.execute("SELECT path FROM items").fetchall()
-        return {
-            row["path"].decode() if isinstance(row["path"], bytes) else row["path"]
-            for row in rows
-        }
+        result: set[str] = set()
+        for row in rows:
+            p_raw = row["path"]
+            raw = p_raw.decode() if isinstance(p_raw, bytes) else p_raw
+            p = Path(raw)
+            if not p.is_absolute():
+                p = config.inbox_path / p
+            result.add(str(p))
+        return result
     finally:
         con.close()

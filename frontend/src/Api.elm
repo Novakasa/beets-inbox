@@ -57,15 +57,31 @@ discardItem itemId toMsg =
         }
 
 
-uploadFiles : String -> List File -> (Result Http.Error () -> msg) -> Cmd msg
-uploadFiles category files toMsg =
+uploadFiles : String -> Bool -> List File -> (Result Http.Error () -> msg) -> Cmd msg
+uploadFiles category autotag files toMsg =
     let
+        params =
+            List.filterMap identity
+                [ if String.isEmpty (String.trim category) then
+                    Nothing
+
+                  else
+                    Just ("category=" ++ category)
+                , Just
+                    (if autotag then
+                        "autotag=true"
+
+                     else
+                        "autotag=false"
+                    )
+                ]
+
         url =
-            if String.isEmpty (String.trim category) then
+            if List.isEmpty params then
                 base ++ "/inbox/upload"
 
             else
-                base ++ "/inbox/upload?category=" ++ category
+                base ++ "/inbox/upload?" ++ String.join "&" params
     in
     Http.request
         { method = "POST"

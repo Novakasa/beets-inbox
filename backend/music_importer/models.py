@@ -17,6 +17,9 @@ class InboxItem(BaseModel):
     # audio file paths inside a group (or [path] for single)
     files: list[str]
 
+    # False while beets is still cataloging (auto-tagging in background)
+    cataloged: bool = False
+
     # Tags — sourced from beets DB then enriched by sidecar
     title: str | None = None
     artist: str | None = None

@@ -132,12 +132,16 @@ def _build_item(
     category: str,
     is_group: bool,
     audio_files: list[Path],
+    cataloged_paths: set[str],
 ) -> InboxItem:
     item_id = path_to_id(config.inbox_path, item_path)
-
-    # Read tags directly from the file — no beets cataloging needed.
     primary = audio_files[0] if audio_files else item_path
-    tags: dict[str, Any] = _read_file_tags(primary)
+
+    # Item is cataloged once beets has processed it and stored it in the DB.
+    cataloged = str(primary) in cataloged_paths
+    tags: dict[str, Any] = (
+        beets_svc.query_item_tags(config, primary) if cataloged else {}
+    )
 
     # Enrich with sidecar (only for single files)
     sidecar_data: dict[str, str] = {}
@@ -152,6 +156,7 @@ def _build_item(
         path=str(item_path),
         is_group=is_group,
         files=[str(f) for f in sorted(audio_files)],
+        cataloged=cataloged,
         title=tags.get("title"),
         artist=tags.get("artist"),
         album=tags.get("album"),
@@ -173,6 +178,12 @@ def scan_inbox(config: Config) -> list[InboxItem]:
     if not inbox.exists():
         return items
 
+    # Fetch cataloged paths once so every _build_item call shares one DB query.
+    cataloged_paths = beets_svc.query_all_inbox_paths(config)
+
+    def mk(path: Path, cat: str, group: bool, files: list[Path]) -> InboxItem:
+        return _build_item(config, path, cat, group, files, cataloged_paths)
+
     for category_dir in sorted(inbox.iterdir()):
         if not category_dir.is_dir():
             continue
@@ -180,15 +191,13 @@ def scan_inbox(config: Config) -> list[InboxItem]:
 
         for entry in sorted(category_dir.iterdir()):
             if entry.is_file() and is_audio(entry):
-                items.append(_build_item(config, entry, category, False, [entry]))
+                items.append(mk(entry, category, False, [entry]))
             elif entry.is_dir():
                 audio_files = sorted(
                     f for f in entry.iterdir() if f.is_file() and is_audio(f)
                 )
                 if audio_files:
-                    items.append(
-                        _build_item(config, entry, category, True, audio_files)
-                    )
+                    items.append(mk(entry, category, True, audio_files))
 
     return items
 
@@ -203,21 +212,25 @@ def get_item(config: Config, item_id: str) -> InboxItem | None:
     if not item_path.exists():
         return None
 
-    # Determine category from path structure
     try:
         rel = item_path.relative_to(config.inbox_path)
         category = rel.parts[0]
     except (ValueError, IndexError):
         return None
 
+    cataloged_paths = beets_svc.query_all_inbox_paths(config)
+
+    def mk(path: Path, group: bool, files: list[Path]) -> InboxItem:
+        return _build_item(config, path, category, group, files, cataloged_paths)
+
     if item_path.is_file() and is_audio(item_path):
-        return _build_item(config, item_path, category, False, [item_path])
+        return mk(item_path, False, [item_path])
     elif item_path.is_dir():
         audio_files = sorted(
             f for f in item_path.iterdir() if f.is_file() and is_audio(f)
         )
         if audio_files:
-            return _build_item(config, item_path, category, True, audio_files)
+            return mk(item_path, True, audio_files)
 
     return None
 
@@ -295,8 +308,19 @@ class InboxWatcher:
         if not path.exists():
             # File was deleted before the debounce fired (e.g. already imported).
             return
+        # Files inside album subdirectories (inbox/category/album/track.flac) are
+        # cataloged at the directory level by the upload endpoint.  Skip them here
+        # to avoid conflicting singleton imports.
+        try:
+            rel = path.relative_to(self._config.inbox_path)
+        except ValueError:
+            return
+        if len(rel.parts) > 2:
+            return
         logger.info("Cataloging new file: %s", path)
-        result = beets_svc.catalog_path(self._config, path)
+        result = beets_svc.catalog_path(
+            self._config, path, autotag=self._config.autotag
+        )
         if result.returncode != 0:
             logger.warning(
                 "beet import returned %d: %s", result.returncode, result.stderr

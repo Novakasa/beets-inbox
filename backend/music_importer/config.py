@@ -13,6 +13,7 @@ class Config:
     default_category: str
     port: int
     library_path: Path | None  # None = no generated main config (user supplies one)
+    autotag: bool              # Whether beets queries MusicBrainz when cataloging
 
     @property
     def beets_inbox_config(self) -> Path:
@@ -41,6 +42,8 @@ def load_config() -> Config:
     default_category = os.environ.get("BEETS_DEFAULT_CATEGORY", "unsorted")
     port = int(os.environ.get("BEETS_INBOX_PORT", "8085"))
     library_path = Path(lp) if (lp := os.environ.get("BEETS_LIBRARY_PATH")) else None
+    autotag_raw = os.environ.get("BEETS_AUTOTAG", "true").lower()
+    autotag = autotag_raw not in ("0", "false", "no")
 
     data_path.mkdir(parents=True, exist_ok=True)
 
@@ -50,4 +53,5 @@ def load_config() -> Config:
         default_category=default_category,
         port=port,
         library_path=library_path,
+        autotag=autotag,
     )

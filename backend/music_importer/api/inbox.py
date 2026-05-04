@@ -67,10 +67,14 @@ async def upload(
     background_tasks: BackgroundTasks,
     config: _ConfigDep,
     category: str | None = None,
+    autotag: bool | None = None,
 ) -> JSONResponse:
     cat = category or config.default_category
     dest_dir = config.inbox_path / cat
     dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # Per-upload autotag flag; falls back to the server-wide config default.
+    use_autotag = autotag if autotag is not None else config.autotag
 
     placed: list[str] = []
     for upload_file in files:
@@ -78,27 +82,34 @@ async def upload(
         data = await upload_file.read()
 
         if filename.lower().endswith(".zip"):
-            placed += _extract_zip(data, dest_dir)
+            # Always extracts into a subdirectory so the album is a group item.
+            album_dir = _extract_zip(data, dest_dir, filename)
+            placed.append(str(album_dir))
+            # Catalog the whole directory at once — beets groups all tracks.
+            background_tasks.add_task(
+                beets_svc.catalog_path, config, album_dir, autotag=use_autotag
+            )
         else:
             dest = dest_dir / filename
             dest.write_bytes(data)
             placed.append(str(dest))
-
-    # Catalog immediately after upload (don't wait for watcher)
-    for p in placed:
-        path = Path(p)
-        if inbox_svc.is_audio(path) or path.is_dir():
-            background_tasks.add_task(beets_svc.catalog_path, config, path)
+            if inbox_svc.is_audio(dest):
+                background_tasks.add_task(
+                    beets_svc.catalog_path, config, dest, autotag=use_autotag
+                )
 
     return JSONResponse({"placed": placed})
 
 
-def _extract_zip(data: bytes, dest_dir: Path) -> list[str]:
-    """Extract ZIP, collapsing a single top-level directory into an album group."""
-    placed: list[str] = []
+def _extract_zip(data: bytes, dest_dir: Path, zip_name: str) -> Path:
+    """Extract a ZIP into a named subdirectory and return that directory.
+
+    ZIPs with a single top-level folder use that folder name (Bandcamp pattern).
+    ZIPs with flat contents are placed in a folder named after the ZIP file so
+    the album is treated as a group item in the inbox.
+    """
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
-        names = zf.namelist()
-        # Detect single top-level directory (bandcamp ZIP pattern)
+        names = [n for n in zf.namelist() if not n.startswith("__MACOSX")]
         top_dirs = {n.split("/")[0] for n in names if "/" in n}
         top = next(iter(top_dirs)) if top_dirs else None
         single_top = (
@@ -109,24 +120,25 @@ def _extract_zip(data: bytes, dest_dir: Path) -> list[str]:
 
         if single_top and top is not None:
             album_dir = dest_dir / top
-            album_dir.mkdir(exist_ok=True)
-            for member in zf.infolist():
-                rel = member.filename[len(top) + 1:]
-                if not rel or member.is_dir():
-                    continue
-                out = album_dir / rel
-                out.parent.mkdir(parents=True, exist_ok=True)
-                out.write_bytes(zf.read(member.filename))
-                placed.append(str(out))
+            prefix = top + "/"
         else:
-            for member in zf.infolist():
-                if member.is_dir():
-                    continue
-                out = dest_dir / Path(member.filename).name
-                out.write_bytes(zf.read(member.filename))
-                placed.append(str(out))
+            # Flat ZIP: use the ZIP filename (without extension) as the subdir.
+            album_dir = dest_dir / Path(zip_name).stem
+            prefix = ""
 
-    return placed
+        album_dir.mkdir(exist_ok=True)
+
+        for member in zf.infolist():
+            if member.is_dir() or member.filename.startswith("__MACOSX"):
+                continue
+            rel = member.filename[len(prefix):] if prefix else Path(member.filename).name
+            if not rel:
+                continue
+            out = album_dir / rel
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(zf.read(member.filename))
+
+    return album_dir
 
 
 # ── Import ────────────────────────────────────────────────────────────────────
