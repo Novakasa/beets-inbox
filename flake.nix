@@ -7,9 +7,6 @@
   };
 
   outputs = { self, nixpkgs, flake-utils }:
-    let
-      nixosModule = import ./nix/module.nix;
-    in
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -74,6 +71,33 @@
       {
         packages.default = beetsInboxPackage;
 
+        # ── NixOS module test ─────────────────────────────────────────────────
+        checks.nixos-module = pkgs.testers.nixosTest {
+          name = "beets-inbox-module";
+
+          nodes.machine = { ... }: {
+            imports = [ self.nixosModules.default ];
+            services.beets-inbox = {
+              enable = true;
+              inboxPath = "/var/lib/beets-inbox/inbox";
+            };
+            # Allow the test script to reach the service
+            networking.firewall.allowedTCPPorts = [ 8085 ];
+          };
+
+          testScript = ''
+            machine.wait_for_unit("beets-inbox.service")
+            machine.wait_for_open_port(8085)
+
+            # API responds
+            out = machine.succeed("curl -sf http://localhost:8085/api/inbox")
+            assert out.strip() == "[]", f"Expected empty inbox, got: {out!r}"
+
+            # Frontend is served
+            machine.succeed("curl -sf http://localhost:8085/ | grep -q 'beets-inbox'")
+          '';
+        };
+
         devShells.default = pkgs.mkShell {
           packages = [
             # Python
@@ -90,7 +114,6 @@
             pkgs.haskellPackages.elm2nix
 
             # Tools
-            pkgs.sqlite
             pkgs.just
             pkgs.sox
           ];
@@ -109,6 +132,10 @@
         };
       }
     ) // {
-      nixosModules.default = nixosModule;
+      nixosModules.default = { pkgs, lib, ... }: {
+        imports = [ ./nix/module.nix ];
+        config.services.beets-inbox.package = lib.mkDefault
+          self.packages.${pkgs.system}.default;
+      };
     };
 }
