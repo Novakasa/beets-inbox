@@ -118,6 +118,9 @@ in
           BEETS_INBOX_PORT = toString cfg.port;
           BEETS_AUTOTAG = if cfg.autotag then "true" else "false";
           BEETS_STATIC_DIR = "${cfg.package}/share/beets-inbox/frontend";
+          # beets (via confuse) tries to create $HOME/.config even when
+          # --config is passed explicitly; point HOME at the writable data dir.
+          HOME = cfg.dataPath;
         }
         (lib.optionalAttrs (cfg.libraryPath != null) {
           BEETS_LIBRARY_PATH = cfg.libraryPath;
