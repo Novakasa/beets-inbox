@@ -48,10 +48,8 @@ plugins: []
 
 
 def write_inbox_config(config: Config) -> None:
-    """Write inbox-beets.yaml if it doesn't exist yet."""
+    """Write inbox-beets.yaml, overwriting any existing file to stay in sync."""
     cfg_path = config.beets_inbox_config
-    if cfg_path.exists():
-        return
     cfg_path.write_text(
         _INBOX_CONFIG_TEMPLATE.format(
             inbox_path=config.inbox_path,
@@ -61,10 +59,8 @@ def write_inbox_config(config: Config) -> None:
 
 
 def write_main_config(config: Config, library_path: Path) -> None:
-    """Write main-beets.yaml if it doesn't exist yet."""
+    """Write main-beets.yaml, overwriting any existing file to stay in sync."""
     cfg_path = config.beets_main_config
-    if cfg_path.exists():
-        return
     cfg_path.write_text(
         _MAIN_CONFIG_TEMPLATE.format(
             library_path=library_path,
