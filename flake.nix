@@ -135,7 +135,7 @@
       nixosModules.default = { pkgs, lib, ... }: {
         imports = [ ./nix/module.nix ];
         config.services.beets-inbox.package = lib.mkDefault
-          self.packages.${pkgs.system}.default;
+          self.packages.${pkgs.stdenv.hostPlatform.system}.default;
       };
     };
 }
