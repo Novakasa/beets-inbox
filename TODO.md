@@ -2,35 +2,16 @@
 
 ## Bugs
 
-### Files dropped by ytdl-sub get stuck in "Cataloging…" forever
+### ~~Files dropped by ytdl-sub get stuck in "Cataloging…" forever~~ FIXED
 
-Observed in production (2026-08-28): 5 of 7 inbox items (`live-sets/*.m4a`)
-have `cataloged: false` permanently — the UI shows "Cataloging…" with the
-import buttons disabled, and there is no way to recover from the UI except
-Discard.
-
-Root cause (reproduced locally against a demo server):
-
-1. yt-dlp/ytdl-sub downloads to a temp name (`track.m4a.part`) and then
-   renames it to the final name. The watcher's create event fires for the
-   `.part` name, which fails the audio-extension check and is ignored.
-   The rename emits a `FileMovedEvent`, but `_InboxEventHandler` only
-   overrides `on_created` — moves are silently dropped, so the file is
-   never cataloged.
-2. There is no reconciliation: nothing scans for uncataloged files at
-   startup or periodically, so a missed event (moved-in file, catalog
-   failure, service down when the file arrived) is never retried.
-
-Candidate fixes (do both):
-- Handle `on_moved` in the watcher (schedule the move destination the same
-  way as created files).
-- Add a reconciliation sweep at startup + periodically: any inbox audio
-  file not in the inbox beets DB gets cataloged. This also self-heals the
-  existing stuck production entries after a deploy/restart.
-
-Test hook: the `.part`-then-rename repro is scriptable against the demo
-server; a watcher-level pytest needs the `InboxWatcher` running (not
-covered by the TestClient harness, which skips the lifespan).
+Fixed 2026-08-28 by replacing the event-based watcher with a reconciling
+`Cataloger` (`services/cataloger.py`): an idempotent `sync()` sweep at
+startup + every 30s diffs the inbox directory against the inbox beets DB
+in both directions. Missed arrivals (the `.part`-rename case), catalog
+failures, and orphan DB rows all self-heal; failures surface as
+`catalog_error` in the API/UI. The stuck production items catalog
+themselves on the next deploy/restart. watchdog dependency removed.
+Decision record: docs/architecture-review-2026-08-28.md, candidate 1.
 
 ### Sidecar lookup never finds yt-dlp info.json files
 
@@ -48,12 +29,13 @@ the metadata needed to tell near-duplicate downloads apart (see the two
 video re-downloaded after a YouTube title edit, or two distinct uploads —
 undecidable from the API precisely because source_url is missing).
 
-### Uncataloged items show no tags even when the file has embedded tags
+### ~~Uncataloged items show no tags even when the file has embedded tags~~ RESOLVED
 
-`_read_file_tags` (mutagen direct read) in `services/inbox.py` is dead
-code — `_build_item` only reads tags from the beets DB, so an uncataloged
-item renders with no metadata at all even though the file itself is tagged.
-Either wire it up as a fallback for uncataloged items or delete it.
+Resolved 2026-08-28: `_read_file_tags` deleted (mutagen moved to dev
+deps). With the reconciliation sweep the uncataloged window is seconds,
+so the mutagen-fallback path no longer earns its keep. Items whose
+*catalog* failed now show `catalog_error` and can still be imported
+as-is (beets reads the embedded tags at import time).
 
 ## Design: multiple target libraries, drop categories
 

@@ -60,6 +60,7 @@ type alias InboxItem =
     , isGroup : Bool
     , files : List String
     , cataloged : Bool
+    , catalogError : Maybe String
     , title : Maybe String
     , artist : Maybe String
     , album : Maybe String
@@ -83,6 +84,7 @@ inboxItemDecoder =
         |> andMap (D.field "is_group" D.bool)
         |> andMap (D.field "files" (D.list D.string))
         |> andMap (D.field "cataloged" D.bool)
+        |> andMap (D.field "catalog_error" (D.nullable D.string))
         |> andMap (D.field "title" (D.nullable D.string))
         |> andMap (D.field "artist" (D.nullable D.string))
         |> andMap (D.field "album" (D.nullable D.string))

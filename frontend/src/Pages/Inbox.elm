@@ -377,19 +377,41 @@ viewItemRow item =
             ]
 
     else
-        div [ class "item-row item-row--cataloging" ]
-            [ div [ class "item-info" ]
-                [ span [ class "item-name" ] [ text (displayName item) ]
-                , span [ class "tag-summary cataloging-msg" ] [ text "Cataloging…" ]
-                ]
-            , div [ class "item-actions" ]
-                [ button [ class "btn", disabled True ] [ text "Import as-is" ]
-                , button [ class "btn btn-primary", disabled True ] [ text "Edit & Import" ]
-                , button
-                    [ onClick (Discard item.id), class "btn btn-danger" ]
-                    [ text "Discard" ]
-                ]
-            ]
+        case item.catalogError of
+            Just err ->
+                -- Cataloging failed: import falls back to the file's embedded
+                -- tags (editing needs a catalog entry, so it stays disabled).
+                div [ class "item-row item-row--catalog-failed" ]
+                    [ div [ class "item-info" ]
+                        [ span [ class "item-name" ] [ text (displayName item) ]
+                        , span [ class "tag-summary catalog-error-msg" ]
+                            [ text ("Catalog failed: " ++ err) ]
+                        ]
+                    , div [ class "item-actions" ]
+                        [ button
+                            [ onClick (ImportAsIs item.id), class "btn" ]
+                            [ text "Import as-is" ]
+                        , button [ class "btn btn-primary", disabled True ] [ text "Edit & Import" ]
+                        , button
+                            [ onClick (Discard item.id), class "btn btn-danger" ]
+                            [ text "Discard" ]
+                        ]
+                    ]
+
+            Nothing ->
+                div [ class "item-row item-row--cataloging" ]
+                    [ div [ class "item-info" ]
+                        [ span [ class "item-name" ] [ text (displayName item) ]
+                        , span [ class "tag-summary cataloging-msg" ] [ text "Cataloging…" ]
+                        ]
+                    , div [ class "item-actions" ]
+                        [ button [ class "btn", disabled True ] [ text "Import as-is" ]
+                        , button [ class "btn btn-primary", disabled True ] [ text "Edit & Import" ]
+                        , button
+                            [ onClick (Discard item.id), class "btn btn-danger" ]
+                            [ text "Discard" ]
+                        ]
+                    ]
 
 
 viewTrackList : List TrackInfo -> Html Msg

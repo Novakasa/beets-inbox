@@ -26,8 +26,11 @@ class InboxItem(BaseModel):
     is_group: bool                   # True = album directory, False = single file
     files: list[str]                 # audio file paths (or [path] for singles)
 
-    # False while beets is still cataloging (auto-tagging in background)
+    # True once every audio file has a row in the inbox beets DB.  False while
+    # the Cataloger hasn't swept it yet — or its last catalog attempt failed,
+    # in which case catalog_error says why.
     cataloged: bool = False
+    catalog_error: str | None = None
 
     # Album-level tags — sourced from beets DB then enriched by sidecar
     title: str | None = None

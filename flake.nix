@@ -35,9 +35,7 @@
         pythonDeps = ps: with ps; [
           fastapi
           uvicorn
-          watchdog
           python-multipart
-          mutagen
         ];
 
         beetsInboxPackage = python.pkgs.buildPythonApplication {

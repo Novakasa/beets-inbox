@@ -9,7 +9,7 @@ Status: recorded, none implemented yet. Line references are as of commit
 
 ---
 
-## 1 · A reconciling Cataloger — **Strong**
+## 1 · A reconciling Cataloger — **Strong** — ✅ implemented 2026-08-28
 
 **Files:** `services/inbox.py:263–375` (watcher) · `services/beets.py:83`
 (`catalog_path`), `:288` (`query_all_inbox_paths` — dead) ·

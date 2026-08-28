@@ -4,12 +4,20 @@ from __future__ import annotations
 import logging
 import sqlite3
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any
 
 from ..config import Config
 
 logger = logging.getLogger(__name__)
+
+# Serializes every subprocess that writes the inbox beets DB (catalog, modify,
+# remove) — two concurrent `beet` processes on one SQLite DB can fail with
+# "database is locked".  Held per operation, so a slow autotag catalog can't
+# starve an import for longer than one item.  The main-library DB has a single
+# writer (import) and needs no lock.
+_inbox_db_lock = threading.Lock()
 
 # ── Config generation ──────────────────────────────────────────────────────────
 
@@ -97,11 +105,12 @@ def catalog_path(
     singleton = ["-s"] if path.is_file() else []
     verbose = ["-v"] if autotag else []
     logger.info("catalog_path start  autotag=%-5s  %s", autotag, path)
-    result = _beet(
-        config.beets_inbox_config,
-        *verbose, "import", "-q", *no_autotag, *singleton, str(path),
-        check=False,
-    )
+    with _inbox_db_lock:
+        result = _beet(
+            config.beets_inbox_config,
+            *verbose, "import", "-q", *no_autotag, *singleton, str(path),
+            check=False,
+        )
     if result.returncode == 0:
         logger.info("catalog_path done   rc=0          %s", path)
     else:
@@ -124,11 +133,12 @@ def modify_item(
     if not set_args:
         return subprocess.CompletedProcess([], 0, "", "")
     query = f"path:{path}/" if path.is_dir() else f"path:{path}"
-    result = _beet(
-        config.beets_inbox_config,
-        "modify", "-y", *set_args, query,
-        check=False,
-    )
+    with _inbox_db_lock:
+        result = _beet(
+            config.beets_inbox_config,
+            "modify", "-y", *set_args, query,
+            check=False,
+        )
     if result.returncode != 0:
         logger.warning(
             "beet modify failed rc=%d  %s\n  stderr: %s",
@@ -144,11 +154,12 @@ def remove_from_inbox(config: Config, path: Path) -> subprocess.CompletedProcess
     cleanup happens even when the item was never cataloged in the inbox DB.
     """
     query = f"path:{path}/" if path.is_dir() else f"path:{path}"
-    return _beet(
-        config.beets_inbox_config,
-        "remove", "-f", query,
-        check=False,
-    )
+    with _inbox_db_lock:
+        return _beet(
+            config.beets_inbox_config,
+            "remove", "-f", query,
+            check=False,
+        )
 
 
 # ── Main library import ───────────────────────────────────────────────────────

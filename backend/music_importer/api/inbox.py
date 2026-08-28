@@ -4,10 +4,9 @@ from __future__ import annotations
 import io
 import logging
 import shutil
-import threading
 import zipfile
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
@@ -17,17 +16,21 @@ from ..models import InboxItem, TagUpdate
 from ..services import beets as beets_svc
 from ..services import inbox as inbox_svc
 
+if TYPE_CHECKING:
+    from ..services.cataloger import Cataloger
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/inbox", tags=["inbox"])
 
 # Injected by main.py at startup
 _config: Config | None = None
-_import_lock = threading.Lock()
+_cataloger: Cataloger | None = None
 
 
-def init(config: Config) -> None:
-    global _config
+def init(config: Config, cataloger: Cataloger | None = None) -> None:
+    global _config, _cataloger
     _config = config
+    _cataloger = cataloger
 
 
 def _cfg() -> Config:
@@ -36,7 +39,12 @@ def _cfg() -> Config:
     return _config
 
 
+def _catalog_errors() -> dict[str, str]:
+    return _cataloger.catalog_errors() if _cataloger is not None else {}
+
+
 _ConfigDep = Annotated[Config, Depends(_cfg)]
+_CatalogErrorsDep = Annotated[dict[str, str], Depends(_catalog_errors)]
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
@@ -44,9 +52,10 @@ _ConfigDep = Annotated[Config, Depends(_cfg)]
 @router.get("", response_model=list[InboxItem])
 def list_inbox(
     config: _ConfigDep,
+    catalog_errors: _CatalogErrorsDep,
     category: str | None = None,
 ) -> list[InboxItem]:
-    items = inbox_svc.scan_inbox(config)
+    items = inbox_svc.scan_inbox(config, catalog_errors)
     if category:
         items = [i for i in items if i.category == category]
     return items

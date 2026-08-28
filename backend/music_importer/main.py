@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from .api import inbox as inbox_api
 from .config import load_config
 from .services import beets as beets_svc
-from .services.inbox import InboxWatcher
+from .services.cataloger import Cataloger
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,12 +39,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if config.library_path is not None:
         beets_svc.write_main_config(config, config.library_path)
 
-    # Wire API router
-    inbox_api.init(config)
+    # Start the reconciling cataloger (sweeps now and periodically)
+    cataloger = Cataloger(config)
 
-    # Start inbox watcher
-    watcher = InboxWatcher(config)
-    watcher.start()
+    # Wire API router
+    inbox_api.init(config, cataloger)
+
+    cataloger.start()
 
     logger.info("beets-inbox started on port %d", config.port)
     logger.info("  inbox:   %s", config.inbox_path)
@@ -52,7 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    watcher.stop()
+    cataloger.stop()
 
 
 app = FastAPI(title="beets-inbox", lifespan=lifespan)
