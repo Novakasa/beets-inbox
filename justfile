@@ -34,7 +34,7 @@ dev: sync
     cd backend && uv run uvicorn music_importer.main:app --reload --port 8085
 
 # Start a demo server with a temporary inbox and library (no real beets library needed)
-dev-demo: sync
+dev-demo: sync build-frontend
     #!/usr/bin/env bash
     set -euo pipefail
     DEMO_DIR="$(mktemp -d /tmp/beets-inbox-demo.XXXXXX)"
@@ -56,12 +56,6 @@ dev-demo: sync
 # Generate tiny tagged FLAC files in test-fixtures/ for manual testing
 make-fixtures: sync
     cd backend && uv run python ../scripts/make_test_fixtures.py
-
-# ── Validation ────────────────────────────────────────────────────────────────
-
-# Validate the two-beets-libraries approach with real beets commands
-validate-beets:
-    bash scripts/validate-beets.sh
 
 # ── Elm ───────────────────────────────────────────────────────────────────────
 

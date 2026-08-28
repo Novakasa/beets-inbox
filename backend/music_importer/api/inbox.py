@@ -96,7 +96,7 @@ async def upload(
                     beets_svc.catalog_path, config, dest, autotag=use_autotag
                 )
 
-    return JSONResponse({"placed": placed})
+    return JSONResponse({"placed": placed}, status_code=202)
 
 
 def _extract_zip(data: bytes, dest_dir: Path, zip_name: str) -> Path:
@@ -183,7 +183,7 @@ def import_item(
         raise HTTPException(status_code=503, detail="No main library configured")
 
     background_tasks.add_task(_run_import, config, item)
-    return JSONResponse({"status": "accepted"})
+    return JSONResponse({"status": "accepted"}, status_code=202)
 
 
 def _run_import(config: Config, item: InboxItem) -> None:
@@ -192,6 +192,10 @@ def _run_import(config: Config, item: InboxItem) -> None:
     # Read the current tags from the inbox beets DB as the source of truth.
     tags = beets_svc.query_item_tags(config, path if path.is_file() else
                                      next((Path(f) for f in item.files), path))
+    if path.is_dir():
+        # Album import: --set stamps every track, so per-track fields must
+        # come from the files themselves, not the first track's DB entry.
+        tags = {k: v for k, v in tags.items() if k not in ("title", "track")}
 
     logger.info("Importing %s with tags %s", path, tags)
     result = beets_svc.import_to_library(config, path, tags)
