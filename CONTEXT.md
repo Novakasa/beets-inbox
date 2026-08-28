@@ -9,7 +9,7 @@ and reviews; sharpen them here when they drift.
   DB annotates it.
 - **Category** — a top-level subdirectory of the inbox. Pure labeling
   today; slated to be replaced by one-inbox-per-target-library (see
-  TODO.md design section).
+  STATUS.md design section).
 - **Inbox item** — the unit the user reviews and imports: either a
   **single** (a top-level audio file within a category) or an **album
   group** (a directory of audio files imported as one album).

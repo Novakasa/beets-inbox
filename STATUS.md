@@ -1,4 +1,7 @@
-# TODO
+# Status
+
+Bugs, pending design work, and feature ideas. Fixed entries stay (struck
+through) as a short record; details live in git history and docs/.
 
 ## Bugs
 

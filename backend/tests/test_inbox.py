@@ -62,3 +62,15 @@ def test_get_item_roundtrip(inbox_config: Config, standalone_flac: Path) -> None
     assert item is not None
     assert item.id == item_id
     assert item.path == str(standalone_flac)
+
+
+def test_get_item_rejects_ids_escaping_the_inbox(inbox_config: Config) -> None:
+    """A crafted ID must not address files outside the inbox."""
+    outside = inbox_config.inbox_path.parent / "outside.flac"
+    outside.touch()
+
+    traversal_id = "../outside.flac".encode().hex()
+    absolute_id = str(outside).encode().hex()
+
+    assert inbox_svc.get_item(inbox_config, traversal_id) is None
+    assert inbox_svc.get_item(inbox_config, absolute_id) is None

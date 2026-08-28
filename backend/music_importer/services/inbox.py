@@ -30,7 +30,10 @@ def path_to_id(inbox_path: Path, item_path: Path) -> str:
 
 
 def id_to_path(inbox_path: Path, item_id: str) -> Path:
-    rel = bytes.fromhex(item_id).decode()
+    rel = Path(bytes.fromhex(item_id).decode())
+    # A crafted ID must not address anything outside the inbox.
+    if rel.is_absolute() or ".." in rel.parts:
+        raise ValueError(f"item id escapes the inbox: {item_id}")
     return inbox_path / rel
 
 

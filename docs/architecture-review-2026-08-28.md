@@ -1,6 +1,6 @@
 # Architecture review — 2026-08-28
 
-Scoped by TODO.md (watcher bug, sidecar bug, dead tag reader, multi-library
+Scoped by STATUS.md — TODO.md at the time — (watcher bug, sidecar bug, dead tag reader, multi-library
 direction). Vocabulary: module / interface / depth / seam / adapter /
 leverage / locality (see `/codebase-design`).
 
@@ -183,21 +183,18 @@ stand.
 
 ## Hygiene — not deepenings, just deletions
 
-- `_read_file_tags` (`services/inbox.py:85–124`, TODO bug #3): zero
-  callers. With candidate 1's sweep the uncataloged window shrinks to
-  seconds, so the wire-it-up-as-fallback option loses its case → delete.
-  Also drops mutagen from runtime deps entirely (`pyproject.toml`,
-  `flake.nix` pythonDeps), plus the stranded `contextlib` import and the
-  redundant `import mutagen`.
-- `_import_lock` (`api/inbox.py:25`): never acquired; `threading` imported
-  only for it. Delete the lock, keep the invariant — serialize beets
-  writes inside candidate 1's Cataloger.
-- `get_item` (`services/inbox.py:237`) loads the *entire* inbox tag table
-  to build one item, and PATCH/import/DELETE each call it —
-  `query_item_tags` already exists for the single-path case.
-- `id_to_path` (`services/inbox.py:45`) has no containment guard —
-  traversal is contained by accident (via the `relative_to` in
-  `get_item`). Add an explicit check while touching the layout module.
+- ✅ `_read_file_tags` (`services/inbox.py:85–124`, TODO bug #3): deleted
+  2026-08-28; mutagen moved to dev deps (still used by the fixture
+  script).
+- ✅ `_import_lock` (`api/inbox.py:25`): deleted 2026-08-28; the invariant
+  now lives as a real lock around inbox-DB-writing subprocesses in
+  `services/beets.py`.
+- ⏳ `get_item` loads the *entire* inbox tag table to build one item, and
+  PATCH/import/DELETE each call it. Deliberately left: the proper fix is
+  a paths-filtered reader in `services/beets.py`, which belongs to the
+  reader-duplication cleanup below. Negligible cost at inbox scale.
+- ✅ `id_to_path`: explicit containment guard added 2026-08-28 (rejects
+  absolute and `..` IDs).
 
 Related duplication worth folding into whichever candidate touches it
 first: schema discovery copy-pasted in `beets.py` readers (`:230–233` vs
