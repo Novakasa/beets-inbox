@@ -51,6 +51,41 @@ trigger it. The diff primitive already exists as dead code:
   acquired)
 - self-heals the stuck production items on next deploy/restart
 
+### Decisions (grilled 2026-08-28)
+
+1. **Trigger model:** pure periodic sweep — watchdog deleted entirely
+   (dependency removed from `pyproject.toml` and `flake.nix`). No events;
+   startup + timer only.
+2. **Stability:** catalog a file only when its mtime is older than a
+   stability window. Stateless; rename preserves mtime so ytdl-sub files
+   catalog on the first sweep after rename.
+3. **Diff unit:** per inbox item, using the same classification
+   `scan_inbox` uses (no new layout encoding). An item needs cataloging
+   when *any* audio file is missing from the DB and all are stable.
+   `cataloged` semantics change from first-file to all-files.
+4. **Partial groups:** `beet remove path:dir/` then re-catalog the whole
+   directory. Pending edits lost only in the add-a-track-later edge case;
+   acceptable for a scratchpad.
+5. **Reverse diff:** yes — each sweep prunes inbox-DB rows whose file no
+   longer exists on disk. File replacement (same path, new content) stays
+   out of scope.
+6. **Failures:** retry every sweep, no backoff. In-memory map path → last
+   error, cleared on success/restart; `InboxItem` gains nullable
+   `catalog_error`; Elm shows "Catalog failed" with import enabled
+   (embedded-tags path) instead of eternal "Cataloging…".
+7. **Serialization:** one in-process lock in `services/beets.py` around
+   every inbox-DB-writing subprocess (catalog, modify, remove), held per
+   operation. `_import_lock` deleted.
+8. **Placement:** new `services/cataloger.py` — `Cataloger(config)` with
+   `start()`/`stop()`, `sync()`, and the error map. Watcher code deleted
+   from `services/inbox.py`. Upload keeps its direct `catalog_path`
+   (under the shared lock).
+9. **Cadence:** 30 s sweep interval, 30 s stability window — constructor
+   params with defaults, no env vars (candidate 4 restructures config).
+10. **Tests:** all behavior through `sync()` with real beets (rename
+    repro, stability, partial group, orphan pruning, `catalog_error` via
+    API) plus one `start()`/`stop()` smoke test. No lifespan harness.
+
 ---
 
 ## 2 · One inbox-layout module — **Strong**
